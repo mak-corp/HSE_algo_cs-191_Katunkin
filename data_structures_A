@@ -1,0 +1,216 @@
+// Copyright 2020: Katunkin Mikhail
+
+#pragma once
+#include <vector>
+#include <algorithm>
+#include <utility>
+#include <list>
+#include <stdexcept>
+
+const int DEF_CAP = 1;
+
+template<typename KeyType, typename ValueType, class Hash = std::hash<KeyType>>
+class HashMap {
+ private:
+    using List_it =
+        typename std::list<std::pair<const KeyType, ValueType>>::iterator;
+    using Data = std::pair<const KeyType, ValueType>;
+
+    size_t cap = DEF_CAP;
+    size_t sz = 0;
+    Hash hash;
+
+    std::vector<std::vector<List_it>> ht;
+    std::list<Data> elem;
+
+    void add(const Data& el) {
+        auto p = get(el.first);
+        size_t h = p.first;
+        int ind = p.second;
+
+        if (ind == -1) {
+            elem.push_back(el);
+            auto it = elem.end();
+            it--;
+            ht[h].push_back(it);
+            sz++;
+        }
+
+        if (2 * sz >= cap)
+            rebuild(2 * cap);
+    }
+
+    void del(const KeyType& key) {
+        auto p = get(key);
+        size_t h = p.first;
+        int ind = p.second;
+
+        if (ind != -1) {
+            std::swap(ht[h][ind], ht[h].back());
+            elem.erase(ht[h].back());
+            ht[h].pop_back();
+            sz--;
+        }
+
+        if (8 * sz <= cap && cap >= 2)
+            rebuild(cap / 2);
+    }
+
+    std::pair<size_t, int> get(const KeyType& key) const {
+        size_t h = hash(key) % cap;
+
+        int ind = -1;
+        for (int i = 0; i < static_cast<int>(ht[h].size()); i++) {
+            if (ht[h][i]->first == key) {
+                ind = i;
+                break;
+            }
+        }
+        return { h, ind };
+    }
+
+    void rebuild(size_t newcap) {
+        ht.assign(newcap, std::vector<List_it>());
+        cap = newcap;
+
+        for (auto it = elem.begin(); it != elem.end(); it++) {
+            size_t h = hash(it->first) % cap;
+            ht[h].push_back(it);
+        }
+    }
+
+ public:
+    explicit HashMap(Hash h = Hash {}) : hash(h) {
+        ht.resize(cap);
+    }
+
+    template<class Iter>
+    HashMap(Iter begin, Iter end, Hash h = Hash {}) : hash(h) {
+        ht.assign(DEF_CAP, std::vector<List_it>());
+        while (begin != end) {
+            add(*begin);
+            begin++;
+        }
+    }
+
+    HashMap(std::initializer_list<Data> inil, Hash h = Hash {}) : hash(h) {
+        ht.assign(DEF_CAP, std::vector<List_it>());
+        auto it = inil.begin();
+        while (it != inil.end()) {
+            add(*it);
+            it++;
+        }
+    }
+
+    HashMap(const HashMap& other) : sz(other.sz)
+                                  , hash(other.hash)
+                                  , elem(other.elem) {
+        rebuild(other.cap);
+    }
+
+    HashMap(HashMap&& other) : cap(other.cap)
+                             , sz(other.sz)
+                             , hash(std::move(other.hash))
+                             , ht(std::move(other.ht))
+                             , elem(std::move(other.elem)) {}
+
+    HashMap& operator = (const HashMap& other) {
+        hash = other.hash;
+        elem = std::list<Data>(other.elem);
+        sz = other.sz;
+        rebuild(other.cap);
+        return *this;
+    }
+
+    HashMap& operator = (HashMap&& other) {
+        hash = std::move(other.hash);
+        elem = std::list<Data>(std::move(other.elem));
+        sz = other.sz;
+        cap = other.cap;
+        ht = std::move(other.ht);
+        return *this;
+    }
+
+    size_t size() const {
+        return sz;
+    }
+
+    bool empty() const {
+        return sz == 0;
+    }
+
+    Hash hash_function() const {
+        return hash;
+    }
+
+    void insert(const Data& el) {
+        add(el);
+    }
+
+    void erase(const KeyType& el) {
+        del(el);
+    }
+
+    using iterator =
+        typename std::list<std::pair<const KeyType, ValueType>>::iterator;
+    using const_iterator =
+        typename std::list<std::pair<const KeyType, ValueType>>::const_iterator;
+
+    iterator begin() {
+        return elem.begin();
+    }
+
+    iterator end() {
+        return elem.end();
+    }
+
+    const_iterator begin() const {
+        return elem.begin();
+    }
+
+    const_iterator end() const {
+        return elem.end();
+    }
+
+    iterator find(const KeyType& key) {
+        auto p = get(key);
+        size_t h = p.first;
+        int ind = p.second;
+
+        if (ind != -1)
+            return ht[h][ind];
+        else
+            return end();
+    }
+
+    const_iterator find(const KeyType& key) const {
+        auto p = get(key);
+        size_t h = p.first;
+        int ind = p.second;
+
+        if (ind != -1)
+            return const_iterator(ht[h][ind]);
+        else
+            return end();
+    }
+
+    ValueType& operator[](const KeyType& key) {
+        add({ key, ValueType() });
+        return find(key)->second;
+    }
+
+    const ValueType& at(const KeyType& key) const {
+        const_iterator it = find(key);
+        if (it != end())
+            return it->second;
+        else
+            throw std::out_of_range("No such key!");
+    }
+
+    void clear() {
+        elem.clear();
+        sz = 0;
+        ht.assign(DEF_CAP, std::vector<List_it>());
+        cap = DEF_CAP;
+    }
+};
