@@ -1,4 +1,5 @@
 // Copyright 2020: Katunkin Mikhail
+// mishanewyear@mail.ru
 
 #pragma once
 #include <vector>
