@@ -23,8 +23,6 @@
 template <typename KeyType, typename ValueType, class Hash = std::hash<KeyType>>
 class HashMap {
 private:
-    static constexpr size_t kDefaultCapacity = 1;
-
     using ListIter =
         typename std::list<std::pair<const KeyType, ValueType>>::iterator;
     using Element = std::pair<const KeyType, ValueType>;
@@ -36,12 +34,12 @@ private:
     std::vector<std::vector<ListIter>> hash_table_;
     std::list<Element> elements_;
 
-    // Gets key and returns indexes of position in hash table where to look for
+    // Gets hash and returns indexes of position in hash table where to look for
     // element.
     // If there is no such element in hash table - second index is -1.
-    // Works as fast as function calculating hash works.
-    std::pair<size_t, int> get_position(const KeyType& key) const {
-        size_t hash = hash_(key) % capacity_;
+    // Works for expected O(1)
+    std::pair<size_t, int> get_position(const KeyType& key, const size_t& raw_hash) const {
+        size_t hash = raw_hash % capacity_;
 
         int ind = -1;
         for (int i = 0; i < static_cast<int>(hash_table_[hash].size()); i++) {
@@ -51,41 +49,6 @@ private:
             }
         }
         return { hash, ind };
-    }
-
-    // Adds element to hash table and rebuilds it, if necessary.
-    // Works for expected O(1) for adding and O(size) for rebuilding.
-    void add_element(const Element& element) {
-        auto p = get_position(element.first);
-        size_t hash = p.first;
-        int ind = p.second;
-
-        if (ind == -1) {
-            elements_.push_back(element);
-            auto it = elements_.end();
-            it--;
-            hash_table_[hash].push_back(it);
-            size_++;
-        }
-
-        if (2 * size_ >= capacity_) rebuild(2 * capacity_);
-    }
-
-    // Deletes element from hash table and rebuilds it, if ncessary.
-    // Works for expected O(1) for deleting and O(size) for rebuilding.
-    void delete_element(const KeyType& key) {
-        auto p = get_position(key);
-        size_t hash = p.first;
-        int ind = p.second;
-
-        if (ind != -1) {
-            std::swap(hash_table_[hash][ind], hash_table_[hash].back());
-            elements_.erase(hash_table_[hash].back());
-            hash_table_[hash].pop_back();
-            size_--;
-        }
-
-        if (8 * size_ <= capacity_ && capacity_ >= 2) rebuild(capacity_ / 2);
     }
 
     // Rebuilds hash table with given capacity.
@@ -100,7 +63,62 @@ private:
         }
     }
 
+    // Rebuilds hash table if necessary.
+    void rebuild_if_needed() {
+        if (size_ >= kPersentageOfCapacityToIncrease * capacity_) {
+            rebuild(capacity_ * kIncreasingFactor);
+        } else if (size_ <= kPersentageOfCapacityToDecrease * capacity_
+                   && capacity_ > kDefaultCapacity) {
+            rebuild(capacity_ / kDecreasingFactor);
+        }
+    }
+
+    // Adds element to hash table and rebuilds it, if necessary.
+    // Works for expected O(1) for adding and O(size) for rebuilding.
+    size_t add_element(const Element& element) {
+        size_t raw_hash = hash_(element.first);
+        auto p = get_position(element.first, raw_hash);
+        size_t hash = p.first;
+        int ind = p.second;
+
+        if (ind == -1) {
+            elements_.push_back(element);
+            auto it = elements_.end();
+            it--;
+            hash_table_[hash].push_back(it);
+            size_++;
+        }
+
+        rebuild_if_needed();
+        return raw_hash;
+    }
+
+    // Deletes element from hash table and rebuilds it, if necessary.
+    // Works for expected O(1) for deleting and O(size) for rebuilding.
+    void delete_element(const KeyType& key) {
+        size_t raw_hash = hash_(key);
+        auto p = get_position(key, raw_hash);
+        size_t hash = p.first;
+        int ind = p.second;
+
+        if (ind != -1) {
+            std::swap(hash_table_[hash][ind], hash_table_[hash].back());
+            elements_.erase(hash_table_[hash].back());
+            hash_table_[hash].pop_back();
+            size_--;
+        }
+
+        rebuild_if_needed();
+    }
+
+
 public:
+    static constexpr size_t kDefaultCapacity = 1;
+    static constexpr double kPersentageOfCapacityToDecrease = 1.0 / 8.0;
+    static constexpr double kPersentageOfCapacityToIncrease = 1.0 / 2.0;
+    static constexpr double kDecreasingFactor = 2.0;
+    static constexpr double kIncreasingFactor = 2.0;
+
     // Creates hash table with gived hasher.
     // Works for O(default capacity).
     explicit HashMap(Hash hash = Hash{}) : hash_(hash) {
@@ -136,7 +154,8 @@ public:
     // Copy constructor.
     // Works for O(capacity).
     HashMap(const HashMap& other)
-        : size_(other.size_), hash_(other.hash_), elements_(other.elements_) {
+        : size_(other.size_), hash_(other.hash_), elements_(other.elements_)
+    {
         rebuild(other.capacity_);
     }
 
@@ -147,7 +166,8 @@ public:
         size_(other.size_),
         hash_(std::move(other.hash_)),
         hash_table_(std::move(other.hash_table_)),
-        elements_(std::move(other.elements_)) {}
+        elements_(std::move(other.elements_)) 
+    {}
 
     // Copy assignment operator.
     // Works for O(capacity).
@@ -211,14 +231,16 @@ public:
     // If not - returns end() iterator.
     // Works for expected O(1).
     iterator find(const KeyType& key) {
-        auto p = get_position(key);
+        size_t raw_hash = hash_(key);
+        auto p = get_position(key, raw_hash);
         size_t hash = p.first;
         int ind = p.second;
 
-        if (ind != -1)
+        if (ind != -1) {
             return hash_table_[hash][ind];
-        else
+        } else {
             return end();
+        }
     }
 
     // If hash table contains element with such key - returns iterator on such
@@ -226,14 +248,16 @@ public:
     // If not - returns end() iterator.
     // Works for expected O(1).
     const_iterator find(const KeyType& key) const {
-        auto p = get_position(key);
+        size_t raw_hash = hash_(key);
+        auto p = get_position(key, raw_hash);
         size_t hash = p.first;
         int ind = p.second;
 
-        if (ind != -1)
+        if (ind != -1) {
             return const_iterator(hash_table_[hash][ind]);
-        else
+        } else {
             return end();
+        }
     }
 
     // Returns value of element with given key.
@@ -241,8 +265,13 @@ public:
     // default value.
     // Works for expected O(1).
     ValueType& operator[](const KeyType& key) {
-        add_element({ key, ValueType() });
-        return find(key)->second;
+        size_t raw_hash = add_element({ key, ValueType() });
+
+        auto p = get_position(key, raw_hash);
+        size_t hash = p.first;
+        int ind = p.second;
+
+        return hash_table_[hash][ind]->second;
     }
 
     // Returns value of element with given key.
@@ -250,10 +279,11 @@ public:
     // Works for expected O(1).
     const ValueType& at(const KeyType& key) const {
         const_iterator it = find(key);
-        if (it != end())
+        if (it != end()) {
             return it->second;
-        else
+        } else {
             throw std::out_of_range("No such key!");
+        }
     }
 
     // Cleares hash table.
